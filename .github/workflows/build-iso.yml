@@ -53,7 +53,7 @@ jobs:
           echo "Using NixOS 24.05 from binary cache when possible"
           
           # Build ISO - use binary cache if available
-          nix build .#nixosConfigurations.iso.config.system.build.isoImage --out-link result 2>&1
+          nix build .#packages.x86_64-linux.default --out-link result 2>&1
           BUILD_STATUS=$?
           
           echo "=== Build exit status: $BUILD_STATUS ==="
