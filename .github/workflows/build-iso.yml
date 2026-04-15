@@ -8,13 +8,13 @@ on:
 jobs:
   build-iso:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full clone for flakes
+          fetch-depth: 0
       
       - name: Set up disk space
         run: |
@@ -25,6 +25,7 @@ jobs:
             sudo mkswap /swapfile 2>/dev/null || true
             sudo swapon /swapfile 2>/dev/null || true
           fi
+          df -h
       
       - name: Install Nix
         run: |
@@ -38,33 +39,56 @@ jobs:
           mkdir -p ~/.config/nix
           cat > ~/.config/nix/nix.conf << 'EOF'
           experimental-features = nix-command flakes
-          substituters = https://cache.nixos.org
-          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0=
+          substituters = https://cache.nixos.org https://nix-community.cachix.org
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0= nix-community.cachix.org-1:mB9FSh9ef2aH0SaQ+7q3WMAUiQ3pvsGdeZ3gBiXe0yk=
           trusted-users = root ubuntu
+          builders = @/etc/nix/machines
           EOF
       
       - name: Build ISO
         run: |
           . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           
-          echo "=== Building ISO ==="
-          nix build .#default --out-link result -v 2>&1 | tail -80
+          echo "=== Starting ISO build (this may take 10-20 minutes) ==="
+          echo "Using NixOS 24.05 from binary cache when possible"
           
-          echo "=== Checking result ==="
-          ls -la result/ 2>/dev/null || echo "No result"
+          # Build ISO - use binary cache if available
+          nix build .#default --out-link result 2>&1
+          BUILD_STATUS=$?
+          
+          echo "=== Build exit status: $BUILD_STATUS ==="
+          
+          if [ $BUILD_STATUS -eq 0 ]; then
+            echo "Build successful!"
+            ls -la result/
+          else
+            echo "Build failed or incomplete"
+            ls -la result/ 2>/dev/null || echo "No result directory"
+          fi
       
       - name: Copy ISO
+        if: always()
         run: |
           mkdir -p output
           
-          # Find ISO
-          if [ -f result/iso/iso.xz ]; then
-            cp result/iso/iso.xz output/mesh-audio-network.iso.xz
-            xz -d output/mesh-audio-network.iso.xz
-            echo "Found and decompressed ISO"
+          echo "=== Looking for ISO files ==="
+          
+          # Check common locations
+          if [ -L result ] && [ -d "$(readlink result)" ]; then
+            ISO_PATH=$(readlink result)
+            echo "ISO path: $ISO_PATH"
+            ls -la "$ISO_PATH/" 2>/dev/null || true
           fi
           
+          # Find ISO files
+          find . -name "*.iso" -type f 2>/dev/null | head -5
+          find . -name "*.iso.xz" -type f 2>/dev/null | head -5
+          
+          # Copy found files
+          cp result/iso/iso.xz output/ 2>/dev/null || true
+          cp result/iso/*.iso output/ 2>/dev/null || true
           find result -name "*.iso" -exec cp {} output/ \; 2>/dev/null || true
+          find result -name "*.iso.xz" -exec cp {} output/ \; 2>/dev/null || true
           
           echo "=== Files in output/ ==="
           ls -lh output/
@@ -73,11 +97,14 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mesh-audio-network-iso
-          path: output/*
+          name: mesh-audio-network-iso-${{ github.run_number }}
+          path: |
+            output/*.iso
+            output/*.iso.xz
           retention-days: 7
       
       - name: Summary
         run: |
           echo "## Build Summary"
-          ls -lh output/ 2>/dev/null || echo "Empty"
+          echo "ISO files:"
+          ls -lh output/ 2>/dev/null || echo "No ISO found"
