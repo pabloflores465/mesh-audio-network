@@ -2,8 +2,8 @@
 # Build Script for Mesh Audio Network ISO
 # Uses nixpkgs to build NixOS
 
-BUILD_DIR="/build"
-OUTPUT_DIR="/output"
+BUILD_DIR="${BUILD_DIR:-/build}"
+OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 NIXOS_VERSION="24.05"
 
 mkdir -p "$OUTPUT_DIR"
@@ -23,16 +23,10 @@ NIXOS_PATH=$(nix-instantiate --find-file nixos)
 echo "✅ NixOS path: $NIXOS_PATH"
 
 # Create a configuration that NixOS can use
-cat > "$BUILD_DIR/config.nix" << EOF
+cat > "$BUILD_DIR/configuration.nix" << 'NIXCONF'
 { config, pkgs, ... }:
 
 {
-  imports = [ 
-    (builtins.fetchTarball {
-      url = "https://github.com/NixOS/nixpkgs/archive/nixos-${NIXOS_VERSION}.tar.gz";
-    }) + "/nixos/modules/installer/scan/not-detected.nix"
-  ];
-
   # Boot
   boot.loader.grub.enable = true;
   boot.loader.grub.device = "/dev/sda";
@@ -72,7 +66,7 @@ cat > "$BUILD_DIR/config.nix" << EOF
   # Auto-login
   services.getty.autologinUser = "mesh";
 }
-EOF
+NIXCONF
 
 echo ""
 echo "🔨 Building ISO..."
@@ -81,17 +75,11 @@ echo ""
 
 cd "$BUILD_DIR"
 
-# Try to build using nix-build with the channel's nixos
+# Build using nix-build with proper NixOS evaluation
+# The key is to use the correct path to nixos/default.nix
 nix-build \
-    --arg configuration ./config.nix \
-    "$NIXOS_PATH" \
-    -A config.system.build.isoImage \
-    -o result 2>&1 || \
-
-# Alternative: direct nix-build
-nix-build \
-    -I "nixos-config=./config.nix" \
-    "<nixos>" \
+    --arg configuration ./configuration.nix \
+    "${NIXOS_PATH}/nixos/default.nix" \
     -A config.system.build.isoImage \
     -o result 2>&1
 
@@ -110,6 +98,7 @@ if [ -d "result" ]; then
     fi
 else
     echo "❌ Build failed or still in progress"
+    ls -la
 fi
 
 echo "============================================"
