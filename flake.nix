@@ -13,9 +13,8 @@
         "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-base.nix"
       ];
       
-      # Boot
-      boot.loader.grub.enable = true;
-      boot.loader.grub.device = "/dev/sda";
+      # Boot - usar mkForce para sobrescribir
+      boot.loader.grub.device = lib.mkForce "/dev/sda";
       boot.supportedFilesystems = [ "ext4" "vfat" ];
       
       # Enable flakes
