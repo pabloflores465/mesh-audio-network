@@ -48,7 +48,7 @@ jobs:
           . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           
           echo "=== Building ISO ==="
-          nix build .#nixosConfigurations.iso.config.system.build.isoImage --out-link result -v 2>&1 | tail -80
+          nix build .#default --out-link result -v 2>&1 | tail -80
           
           echo "=== Checking result ==="
           ls -la result/ 2>/dev/null || echo "No result"
