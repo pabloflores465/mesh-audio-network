@@ -10,7 +10,7 @@
     
     configuration = { config, pkgs, ... }: {
       imports = [
-        "${nixpkgs}/nixos/modules/installer/scan/not-detected.nix"
+        "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-base.nix"
       ];
       
       # Boot
@@ -52,17 +52,13 @@
       sound.enable = true;
     };
     
-    # Build ISO using nix-build approach
     iso = lib.nixosSystem {
       inherit system;
       modules = [ configuration ];
     };
-    
-    # Get the ISO image path
-    isoDrv = iso.config.system.build.isoImage;
   in
   {
-    packages.${system}.default = isoDrv;
-    defaultPackage.${system} = isoDrv;
+    packages.${system}.default = iso.config.system.build.isoImage;
+    defaultPackage.${system} = self.packages.${system}.default;
   };
 }
