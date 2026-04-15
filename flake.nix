@@ -41,15 +41,14 @@
       
       sound.enable = true;
     };
-    
-    isoSystem = (import nixpkgs {
-      inherit system;
-    }).nixosSystem {
-      inherit configuration;
-    };
   in
   {
-    packages.${system}.default = isoSystem.config.system.build.isoImage;
-    defaultPackage.${system} = isoSystem.config.system.build.isoImage;
+    packages.${system}.default = 
+      (nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [ configuration ];
+      }).config.system.build.isoImage;
+    
+    defaultPackage.${system} = self.packages.${system}.default;
   };
 }
