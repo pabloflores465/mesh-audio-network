@@ -105,7 +105,7 @@ jobs:
           echo 'experimental-features = nix-command flakes' > ~/.config/nix/nix.conf
           
           echo "=== Building ISO with flakes ==="
-          nix build .#nixosConfigurations.iso.config.system.build.isoImage --print-outputs -o result 2>&1 | tail -30
+          nix build .#nixosConfigurations.iso.config.system.build.isoImage -o result 2>&1 | tail -50
           
           echo "=== Checking result ==="
           ls -la result/ 2>/dev/null || echo "No result"
