@@ -11,7 +11,7 @@
     configuration = { config, pkgs, ... }: {
       imports = [
         "${nixpkgs}/nixos/modules/installer/scan/not-detected.nix"
-        "${nixpkgs}/nixos/modules/profiles/installation-device.nix"
+        "${nixpkgs}/nixos/modules/profiles/all-hardware.nix"
       ];
       
       # Boot
@@ -51,6 +51,12 @@
       
       # Sound
       sound.enable = true;
+      
+      # ISO Image settings
+      isoImage = {
+        baseName = "mesh-audio-network";
+        volumeID = "MESH-AUDIO";
+      };
     };
     
     iso = lib.nixosSystem {
