@@ -1,6 +1,5 @@
 #!/bin/sh
 # Build Script for Mesh Audio Network ISO
-# Uses nixpkgs to build NixOS
 
 BUILD_DIR="${BUILD_DIR:-/build}"
 OUTPUT_DIR="${OUTPUT_DIR:-/output}"
@@ -22,11 +21,16 @@ nix-channel --update
 NIXOS_PATH=$(nix-instantiate --find-file nixos)
 echo "✅ NixOS path: $NIXOS_PATH"
 
-# Create a configuration that NixOS can use
+# Create the configuration inline
 cat > "$BUILD_DIR/configuration.nix" << 'NIXCONF'
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
+  imports = [
+    # Import QEMU guest profile which includes ISO support
+    "${NIXOS_PATH}/nixos/modules/profiles/qemu-guest.nix"
+  ];
+
   # Boot
   boot.loader.grub.enable = true;
   boot.loader.grub.device = "/dev/sda";
@@ -75,8 +79,7 @@ echo ""
 
 cd "$BUILD_DIR"
 
-# Build using nix-build with proper NixOS evaluation
-# The key is to use the correct path to nixos/default.nix
+# Build using nix-build with the proper NixOS configuration
 nix-build \
     --arg configuration ./configuration.nix \
     "${NIXOS_PATH}/nixos/default.nix" \
@@ -87,18 +90,16 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Checking result..."
 
-if [ -d "result" ]; then
+if [ -d "result/iso" ]; then
     echo "✅ Build completed!"
-    find result -name "*.iso" -exec cp {} "$OUTPUT_DIR/mesh-audio-network.iso" \; 2>/dev/null
-    if [ -f "$OUTPUT_DIR/mesh-audio-network.iso" ]; then
-        echo "📀 ISO: $OUTPUT_DIR/mesh-audio-network.iso"
-        ls -lh "$OUTPUT_DIR/mesh-audio-network.iso"
-    else
-        find result -name "*.iso"
-    fi
+    cp result/iso/*.iso "$OUTPUT_DIR/mesh-audio-network.iso"
+    ls -lh "$OUTPUT_DIR/mesh-audio-network.iso"
+elif [ -d "result/isoImage" ]; then
+    cp result/isoImage/*.iso "$OUTPUT_DIR/mesh-audio-network.iso"
+    ls -lh "$OUTPUT_DIR/mesh-audio-network.iso"
 else
-    echo "❌ Build failed or still in progress"
-    ls -la
+    echo "❌ Build may have failed"
+    ls -la result/ 2>/dev/null || echo "No result directory"
 fi
 
 echo "============================================"
