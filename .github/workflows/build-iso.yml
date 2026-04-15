@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full clone for flakes
       
       - name: Set up disk space
         run: |
@@ -30,13 +32,7 @@ jobs:
           . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           echo 'export PATH=/nix/var/nix/profiles/default/bin:$PATH' >> $GITHUB_ENV
       
-      - name: Verify flake.nix
-        run: |
-          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-          echo "=== Current flake.nix ==="
-          cat flake.nix
-      
-      - name: Build ISO with flake
+      - name: Configure Nix
         run: |
           . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           mkdir -p ~/.config/nix
@@ -46,9 +42,13 @@ jobs:
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0=
           trusted-users = root ubuntu
           EOF
+      
+      - name: Build ISO
+        run: |
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           
-          echo "=== Building ISO with flakes ==="
-          nix build .#nixosConfigurations.iso.config.system.build.isoImage -o result 2>&1 | tail -50
+          echo "=== Building ISO ==="
+          nix build .#nixosConfigurations.iso.config.system.build.isoImage --out-link result -v 2>&1 | tail -80
           
           echo "=== Checking result ==="
           ls -la result/ 2>/dev/null || echo "No result"
@@ -57,18 +57,14 @@ jobs:
         run: |
           mkdir -p output
           
+          # Find ISO
           if [ -f result/iso/iso.xz ]; then
             cp result/iso/iso.xz output/mesh-audio-network.iso.xz
-            echo "Found ISO at result/iso/iso.xz"
-          fi
-          
-          if [ -f result/isoImage ]; then
-            cp result/isoImage output/mesh-audio-network.iso
-            echo "Found ISO at result/isoImage"
+            xz -d output/mesh-audio-network.iso.xz
+            echo "Found and decompressed ISO"
           fi
           
           find result -name "*.iso" -exec cp {} output/ \; 2>/dev/null || true
-          find result -name "*.iso.xz" -exec cp {} output/ \; 2>/dev/null || true
           
           echo "=== Files in output/ ==="
           ls -lh output/
@@ -84,5 +80,4 @@ jobs:
       - name: Summary
         run: |
           echo "## Build Summary"
-          echo "Files in output/:"
           ls -lh output/ 2>/dev/null || echo "Empty"
