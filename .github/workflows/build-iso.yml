@@ -16,7 +16,6 @@ jobs:
       
       - name: Set up disk space
         run: |
-          # Expand filesystem
           df -h
           # Create swap if needed
           if [ $(free -m | awk '/Mem:/ {print $2}') -lt 4096 ]; then
@@ -25,115 +24,128 @@ jobs:
             sudo mkswap /swapfile 2>/dev/null || true
             sudo swapon /swapfile 2>/dev/null || true
           fi
+          df -h
       
       - name: Install Nix
         run: |
-          sh <(curl -L https://nixos.org/nix/install) --daemon --yes || true
-          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh || \
-          source /root/.nix-profile/etc/profile.d/nix-daemon.sh || true
+          sh <(curl -L https://nixos.org/nix/install) --daemon --yes
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+          echo 'export PATH=/nix/var/nix/profiles/default/bin:$PATH' >> $GITHUB_ENV
       
-      - name: Configure Nix
+      - name: Configure Nix trusted users
         run: |
-          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           mkdir -p ~/.config/nix
-          echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
-          echo 'substituters = https://cache.nixos.org' >> ~/.config/nix/nix.conf
-          echo 'trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0=' >> ~/.config/nix/nix.conf
-          nix-channel --add https://channels.nixos.org/nixos-24.05 nixos || true
-          nix-channel --update || true
+          cat > ~/.config/nix/nix.conf << 'EOF'
+          experimental-features = nix-command flakes
+          substituters = https://cache.nixos.org https://nix-community.cachix.org
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0= nix-community.cachix.org-1:mB9FSh9ef2aH0SaQ+7q3WMAUiQ3pvsGdeZ3gBiXe0yk=
+          trusted-users = root ubuntu
+          builders = @/etc/nix/machines
+          EOF
       
-      - name: Create songs
+      - name: Create configuration.nix
         run: |
-          mkdir -p songs/all_songs songs/node_001
-          for i in $(seq 0 1999); do
-            id=$(printf "song_%04d" $i)
-            echo "{\"id\":\"${id}\",\"name\":\"Song ${i}\",\"artist\":\"Artist $((i % 100))\"}" > "songs/all_songs/${id}.json"
-          done
-          cp songs/all_songs/song_0*.json songs/node_001/ 2>/dev/null || true
-          echo "Created $(ls songs/all_songs/*.json | wc -l) songs"
-      
-      - name: Build ISO
-        run: |
-          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
-          export PATH="$HOME/.nix-profile/bin:$PATH"
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           
-          # Get NixOS path
-          NIXOS_PATH=$(nix-instantiate --find-file nixos)
-          echo "Using NixOS from: $NIXOS_PATH"
-          
-          # Create configuration file
-          cat > configuration.nix << 'NIXCONF'
+          # Create nixos configuration for ISO
+          cat > configuration.nix << 'NIXEOF'
           { config, pkgs, ... }:
           
           {
-            imports = [ 
-              (builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-24.05.tar.gz") 
-              + "/nixos/modules/installer/scan/not-detected.nix"
+            imports = [
+              # Use installation device profile for ISO
+              <nixpkgs/nixos/modules/installer/scan/not-detected.nix>
             ];
           
             # Boot configuration
             boot.loader.grub.enable = true;
-            boot.loader.grub.device = "/dev/sda";
-            boot.supportedFilesystems = [ "ext4" "btrfs" "vfat" ];
+            boot.loader.grub.device = if pkgs.stdenv.isAarch64 then null else (if pkgs.stdenv.hasZfs then null else null);
+            boot.supportedFilesystems = [ ext4 vfat ];
             
             # Enable flakes
-            nix.settings.experimental-features = [ "nix-command" "flakes" ];
+            nix.settings.experimental-features = [ nix-command flakes ];
             nix.channel.enable = true;
             
-            # Locale
-            i18n.defaultLocale = "en_US.UTF-8";
+            # Locale and timezone
+            i18n.defaultLocale = lib.mkForce \"en_US.UTF-8\";
+            time.timeZone = lib.mkForce \"UTC\";
             
-            # Mesh networking
-            boot.kernelModules = [ "batman-adv" "mac80211" "cfg80211" ];
+            # Mesh networking kernel modules
+            boot.kernelModules = [ \"batman-adv\" \"mac80211\" \"cfg80211\" ];
             
             # Network
             networking.firewall.enable = false;
             
-            # Packages
+            # Packages for mesh audio network
             environment.systemPackages = with pkgs; [
               batctl iw wireless-tools iproute2
               ffmpeg mplayer mpg123 opus-tools sox
               python3 curl wget git vim htop
-              go gcc networkmanager wpa_supplicant
+              go gcc
             ];
             
             # Services
             services.openssh.enable = true;
-            services.icecast.enable = true;
             
             # Users
             users.users.mesh = {
               isNormalUser = true;
-              extraGroups = [ "wheel" ];
-              initialPassword = "mesh123";
+              extraGroups = [ \"wheel\" ];
+              initialPassword = \"mesh123\";
             };
-            users.users.root.initialPassword = "root123";
+            users.users.root.initialPassword = \"root123\";
             
             # Sound
             sound.enable = true;
             
-            # Auto-login
-            services.getty.autologinUser = "mesh";
+            # Auto-login (optional - can be disabled for security)
+            # services.getty.autologinUser = \"mesh\";
           }
-          NIXCONF
+          NIXEOF
           
-          echo "Starting build..."
-          nix-build --arg configuration ./configuration.nix "$NIXOS_PATH" -A config.system.build.isoImage -o result
-          
-          echo "Build output:"
-          ls -la result/
+          echo created configuration.nix
+          head -50 configuration.nix
       
-      - name: Copy ISO
+      - name: Build ISO with nix-build
         run: |
-          mkdir -p output
-          cp result/iso/*.iso output/mesh-audio-network.iso 2>/dev/null || \
-          cp result/isoImage/*.iso output/mesh-audio-network.iso 2>/dev/null || \
-          find result -name "*.iso" -exec cp {} output/mesh-audio-network.iso \; 2>/dev/null || true
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
           
-          echo "ISO files:"
-          ls -lh output/
+          echo \"=== Building NixOS ISO ===\"
+          echo \"Nix version: $(nix --version)\"
+          
+          # Build using nixos-rebuild or nix-build
+          nix-build '<nixpkgs/nixos>' -A config.system.build.isoImage -I nixos-config=./configuration.nix --show-trace -o result 2>&1 | tail -100
+          
+          echo \"=== Build finished ===\"
+          ls -la result/ 2>/dev/null || echo \"No result directory\"
       
-      - name: Upload ISO
+      - name: Copy ISO to output
+        run: |
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+          
+          mkdir -p output
+          
+          # Find the ISO file
+          if [ -d result/iso ]; then
+            echo \"Found ISO in result/iso/\"
+            cp result/iso/*.iso output/ 2>/dev/null || true
+          fi
+          
+          if [ -d result ]; then
+            find result -name \"*.iso\" -exec cp {} output/ \";\" 2>/dev/null || true
+          fi
+          
+          echo \"=== ISO files in output/ ===\"
+          ls -lh output/
+          
+          if [ -f output/*.iso ]; then
+            echo \"SUCCESS: ISO created at $(ls output/*.iso)\"
+          else
+            echo \"WARNING: No ISO found in output/\"
+          fi
+      
+      - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -141,12 +153,14 @@ jobs:
           path: |
             output/*.iso
             songs/
-            software/build/
           retention-days: 7
       
       - name: Summary
         run: |
-          echo "## Build Summary"
-          echo "ISO: $(ls output/*.iso 2>/dev/null | head -1 || echo 'Not found')"
-          echo "Songs: $(ls songs/all_songs/*.json 2>/dev/null | wc -l)"
-          echo "Software: $(ls software/build/ 2>/dev/null)"
+          echo \"## Build Summary\"
+          echo \"ISO files: $(ls output/*.iso 2>/dev/null || echo 'None')\"
+          echo \"Songs created: $(ls songs/all_songs/*.json 2>/dev/null | wc -l)\"
+          if [ -f output/*.iso ]; then
+            ISO_SIZE=$(du -h output/*.iso | cut -f1)
+            echo \"ISO size: $ISO_SIZE\"
+          fi
