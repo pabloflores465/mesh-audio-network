@@ -6,9 +6,9 @@
   outputs = { self, nixpkgs }:
   let
     system = "x86_64-linux";
-    pkgs = import nixpkgs { inherit system; };
+    lib = nixpkgs.lib;
     
-    configuration = { config, lib, ... }: {
+    configuration = { config, pkgs, ... }: {
       imports = [
         "${nixpkgs}/nixos/modules/installer/scan/not-detected.nix"
       ];
@@ -52,7 +52,7 @@
       sound.enable = true;
     };
     
-    iso = pkgs.nixosSystem {
+    iso = lib.nixosSystem {
       inherit system;
       modules = [ configuration ];
     };
