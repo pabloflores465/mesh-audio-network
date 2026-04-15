@@ -1,0 +1,19 @@
+# Exclude large song files - they are generated at build time
+songs/all_songs/*.wav
+songs/node_*/song_*.wav
+
+# Keep JSON metadata
+!songs/all_songs/*.json
+!songs/node_*/song_*.json
+
+# Nix build outputs
+result/
+result-*/
+*.drv
+
+# Large output files
+output/*.iso
+
+# OS files
+.DS_Store
+Thumbs.db

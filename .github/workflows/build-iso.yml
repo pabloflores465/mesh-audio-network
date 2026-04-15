@@ -1,0 +1,152 @@
+name: Build Mesh Audio Network ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up disk space
+        run: |
+          # Expand filesystem
+          df -h
+          # Create swap if needed
+          if [ $(free -m | awk '/Mem:/ {print $2}') -lt 4096 ]; then
+            sudo fallocate -l 4G /swapfile || true
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile 2>/dev/null || true
+            sudo swapon /swapfile 2>/dev/null || true
+          fi
+      
+      - name: Install Nix
+        run: |
+          sh <(curl -L https://nixos.org/nix/install) --daemon --yes || true
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh || \
+          source /root/.nix-profile/etc/profile.d/nix-daemon.sh || true
+      
+      - name: Configure Nix
+        run: |
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
+          mkdir -p ~/.config/nix
+          echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+          echo 'substituters = https://cache.nixos.org' >> ~/.config/nix/nix.conf
+          echo 'trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFG5cSKWhX0=' >> ~/.config/nix/nix.conf
+          nix-channel --add https://channels.nixos.org/nixos-24.05 nixos || true
+          nix-channel --update || true
+      
+      - name: Create songs
+        run: |
+          mkdir -p songs/all_songs songs/node_001
+          for i in $(seq 0 1999); do
+            id=$(printf "song_%04d" $i)
+            echo "{\"id\":\"${id}\",\"name\":\"Song ${i}\",\"artist\":\"Artist $((i % 100))\"}" > "songs/all_songs/${id}.json"
+          done
+          cp songs/all_songs/song_0*.json songs/node_001/ 2>/dev/null || true
+          echo "Created $(ls songs/all_songs/*.json | wc -l) songs"
+      
+      - name: Build ISO
+        run: |
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
+          export PATH="$HOME/.nix-profile/bin:$PATH"
+          
+          # Get NixOS path
+          NIXOS_PATH=$(nix-instantiate --find-file nixos)
+          echo "Using NixOS from: $NIXOS_PATH"
+          
+          # Create configuration file
+          cat > configuration.nix << 'NIXCONF'
+          { config, pkgs, ... }:
+          
+          {
+            imports = [ 
+              (builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-24.05.tar.gz") 
+              + "/nixos/modules/installer/scan/not-detected.nix"
+            ];
+          
+            # Boot configuration
+            boot.loader.grub.enable = true;
+            boot.loader.grub.device = "/dev/sda";
+            boot.supportedFilesystems = [ "ext4" "btrfs" "vfat" ];
+            
+            # Enable flakes
+            nix.settings.experimental-features = [ "nix-command" "flakes" ];
+            nix.channel.enable = true;
+            
+            # Locale
+            i18n.defaultLocale = "en_US.UTF-8";
+            
+            # Mesh networking
+            boot.kernelModules = [ "batman-adv" "mac80211" "cfg80211" ];
+            
+            # Network
+            networking.firewall.enable = false;
+            
+            # Packages
+            environment.systemPackages = with pkgs; [
+              batctl iw wireless-tools iproute2
+              ffmpeg mplayer mpg123 opus-tools sox
+              python3 curl wget git vim htop
+              go gcc networkmanager wpa_supplicant
+            ];
+            
+            # Services
+            services.openssh.enable = true;
+            services.icecast.enable = true;
+            
+            # Users
+            users.users.mesh = {
+              isNormalUser = true;
+              extraGroups = [ "wheel" ];
+              initialPassword = "mesh123";
+            };
+            users.users.root.initialPassword = "root123";
+            
+            # Sound
+            sound.enable = true;
+            
+            # Auto-login
+            services.getty.autologinUser = "mesh";
+          }
+          NIXCONF
+          
+          echo "Starting build..."
+          nix-build --arg configuration ./configuration.nix "$NIXOS_PATH" -A config.system.build.isoImage -o result
+          
+          echo "Build output:"
+          ls -la result/
+      
+      - name: Copy ISO
+        run: |
+          mkdir -p output
+          cp result/iso/*.iso output/mesh-audio-network.iso 2>/dev/null || \
+          cp result/isoImage/*.iso output/mesh-audio-network.iso 2>/dev/null || \
+          find result -name "*.iso" -exec cp {} output/mesh-audio-network.iso \; 2>/dev/null || true
+          
+          echo "ISO files:"
+          ls -lh output/
+      
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mesh-audio-network-iso
+          path: |
+            output/*.iso
+            songs/
+            software/build/
+          retention-days: 7
+      
+      - name: Summary
+        run: |
+          echo "## Build Summary"
+          echo "ISO: $(ls output/*.iso 2>/dev/null | head -1 || echo 'Not found')"
+          echo "Songs: $(ls songs/all_songs/*.json 2>/dev/null | wc -l)"
+          echo "Software: $(ls software/build/ 2>/dev/null)"
